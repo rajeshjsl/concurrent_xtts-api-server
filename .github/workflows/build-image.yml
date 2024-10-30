@@ -1,0 +1,39 @@
+name: Docker Multi-arch Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Build for testing
+        uses: docker/build-push-action@v4
+        with:
+          context: ./
+          file: ./docker/Dockerfile.minimal
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,name=myapp:latest,push=false
+          
+      - name: Test container
+        run: |
+          docker run --rm --platform linux/amd64 myapp:latest python -m xtts_api_server --version "v2.0.2"
+          docker run --rm --platform linux/arm64 myapp:latest python -m xtts_api_server --version "v2.0.2"
+
+      - name: Export images
+        run: |
+          docker save myapp:latest -o images.tar
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: docker-images
+          path: images.tar

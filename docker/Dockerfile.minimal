@@ -1,0 +1,96 @@
+# Build stage
+FROM python:3.10-slim as builder
+# Set build-time environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/root/.cargo/bin:${PATH}"
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+        build-essential \
+        curl \
+        pkg-config \
+        git \
+        portaudio19-dev \
+        libasound2-dev && \
+    # Install Rust
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    . "$HOME/.cargo/env"
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel ninja virtualenv
+
+# Install PyTorch CPU versions first
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining requirements
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy the package directory to site-packages
+COPY ./xtts_api_server /usr/local/lib/python3.10/site-packages/xtts_api_server/
+
+# Final stage
+FROM python:3.10-slim
+# Set runtime environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    XTTS_PORT=8020 \
+    XTTS_HOST="0.0.0.0" \
+    XTTS_URL="http://localhost:8020" \
+    SPEAKERS_FOLDER="/app/xtts-server/speakers" \
+    OUTPUT_FOLDER="/app/xtts-server/output" \
+    MODELS_FOLDER="/app/xtts-server/models" \
+    MODEL_SOURCE="local" \
+    USE_CACHE="false"
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+        portaudio19-dev \
+        libportaudio2 \
+        libasound2-dev \
+        libportaudiocpp0 \
+        ffmpeg && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create necessary directories
+RUN mkdir -p /app/xtts-server/speakers \
+    /app/xtts-server/output \
+    /app/xtts-server/models
+
+WORKDIR /app
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.10/site-packages/ /usr/local/lib/python3.10/site-packages/
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+# Prepare cache argument based on environment variable\n\
+CACHE_ARG=""\n\
+if [ "$USE_CACHE" = "true" ]; then\n\
+    CACHE_ARG="--use-cache"\n\
+fi\n\
+\n\
+# Start the server with explicit parameters\n\
+exec python3 -m xtts_api_server \
+    --host $XTTS_HOST \
+    --port $XTTS_PORT \
+    --device cpu \
+    --speaker-folder $SPEAKERS_FOLDER \
+    --output $OUTPUT_FOLDER \
+    --model-folder $MODELS_FOLDER \
+    --model-source $MODEL_SOURCE \
+    --listen \
+    $CACHE_ARG' > /app/start.sh && \
+    chmod +x /app/start.sh
+
+# Expose the container port
+EXPOSE 8020
+
+# Run the start script
+CMD ["/app/start.sh"]

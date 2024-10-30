@@ -1,0 +1,42 @@
+directory structure below:-
+
+  xtts-server volume on host is mapped to /app/xtts-server inside container
+                                       which contains these three folders
+                                          -  output
+                                          -  speakers
+                                          -  models
+
+  create a new folder name sample_male_folder and place sample_male.wav inside it
+  the speaker_wav becomes the folder name 
+
+  /tts_to_audio
+  "text" : test"
+  "language" : "en"
+  "speaker_wav" : "sample_male_folder"
+
+  the folder name becomes the "speaker_wav" regardless of the file names inside it.
+
+  the api supports switching models (which is v2.0.2 by default, you'll need to download the files from https://huggingface.co/coqui/XTTS-v2/tree/v2.0.2  (currently it auto downloads for 2.0.2 since model source is set to local in dockerfile)
+  swagger api is at /docs and it has many options to get speakers list, set models, set model parameters, etc. refer it.
+
+root@oci-london:/var/lib/docker/volumes/blahblah_xtts-server# ls -R
+.:
+_data
+
+./_data:
+models  output  speakers
+
+./_data/models:
+v2.0.2
+
+./_data/models/v2.0.2:
+config.json  model.pth  speakers_xtts.pth  vocab.json
+
+./_data/output:
+20241028183710_cache_a9395e8a-8b98-4b73-be63-7bfc87b0a875.wav  20241028183806_cache_6af0e7df-12c7-4c31-ab66-30b16ab88127.wav  cache.json
+
+./_data/speakers:
+sample_male_folder
+
+./_data/speakers/sample_male_folder:
+sample_male.wav

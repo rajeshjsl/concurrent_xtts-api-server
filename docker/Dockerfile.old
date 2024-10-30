@@ -1,0 +1,92 @@
+# Use ARM64 compatible base image
+FROM ubuntu:22.04
+
+# Set label for the docker image
+LABEL description="Docker image for xtts-api-server (ARM64 CPU Version)" \
+      version="1.0"
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/root/.cargo/bin:${PATH}" \
+    XTTS_PORT=8020 \
+    XTTS_HOST="0.0.0.0" \
+    XTTS_URL="http://localhost:8020" \
+    SPEAKERS_FOLDER="/app/xtts-server/speakers" \
+    OUTPUT_FOLDER="/app/xtts-server/output" \
+    MODELS_FOLDER="/app/xtts-server/models" \
+    MODEL_SOURCE="local" \
+    USE_CACHE="false"
+
+# Install required packages and clean up in a single layer
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+        python3-dev \
+        portaudio19-dev \
+        libportaudio2 \
+        libasound2-dev \
+        libportaudiocpp0 \
+        git \
+        python3 \
+        python3-pip \
+        make \
+        g++ \
+        ffmpeg \
+        curl \
+        pkg-config \
+        build-essential && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel ninja virtualenv
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN . "$HOME/.cargo/env"
+
+# Create necessary directories
+RUN mkdir -p /app/xtts-server/speakers \
+    /app/xtts-server/output \
+    /app/xtts-server/models
+
+WORKDIR /app
+
+# Install CPU version of PyTorch for ARM64
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Install sudachipy separately first
+RUN pip install --no-cache-dir sudachipy
+
+# Install xtts-api-server
+RUN pip install --no-cache-dir xtts-api-server
+
+# Create a startup script
+RUN echo '#!/bin/bash\n\
+# Wait for system to settle\n\
+sleep 5\n\
+\n\
+# Prepare cache argument based on environment variable\n\
+CACHE_ARG=""\n\
+if [ "$USE_CACHE" = "true" ]; then\n\
+    CACHE_ARG="--use-cache"\n\
+fi\n\
+\n\
+# Start the server with explicit parameters\n\
+exec python3 -m xtts_api_server \
+    --host $XTTS_HOST \
+    --port $XTTS_PORT \
+    --device cpu \
+    --speaker-folder $SPEAKERS_FOLDER \
+    --output $OUTPUT_FOLDER \
+    --model-folder $MODELS_FOLDER \
+    --model-source $MODEL_SOURCE \
+    --listen \
+    $CACHE_ARG' > /app/start.sh && \
+    chmod +x /app/start.sh
+
+# Expose the container port
+EXPOSE 8020
+
+# Run the start script
+CMD ["/app/start.sh"]

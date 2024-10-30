@@ -1,0 +1,25 @@
+# if building via docker compose, for coolify, put base directory as /docker and docker compose location as /docker-compose.yml
+
+version: '3.9'
+services:
+  xttsapiserver:
+    image: xttsapiserver
+    env_file: .env
+    build:
+      context: ..
+      dockerfile: ./docker/Dockerfile.minimal
+    volumes:
+      - xtts-server:/app/xtts-server
+    environment:
+      - XTTS_PORT=${CONTAINER_PORT:-8020}
+      - XTTS_HOST=0.0.0.0
+      - XTTS_URL=http://localhost:${CONTAINER_PORT:-8020}
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+    restart: unless-stopped
+
+volumes:
+  xtts-server:
+    name: xtts-server

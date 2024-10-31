@@ -5,8 +5,11 @@ from fastapi.responses import FileResponse,StreamingResponse
 from xtts_api_server.queue_manager import TTSQueueManager
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, AnyHttpUrl
 import uvicorn
+
+import aiohttp
+import asyncio
 
 import os
 import time
@@ -114,6 +117,28 @@ def play_stream(stream,language):
     else:
       stream.play_async()
 
+async def send_callback(callback_url: str, file_path: str):
+    """Send the generated audio file to the callback URL"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            with open(file_path, 'rb') as f:
+                data = aiohttp.FormData()
+                data.add_field('audio_file',
+                             f,
+                             filename='output.wav',
+                             content_type='audio/wav')
+                
+                async with session.post(callback_url, data=data) as response:
+                    if response.status != 200:
+                        logger.error(f"Callback failed with status {response.status}: {await response.text()}")
+                    else:
+                        logger.info(f"Successfully sent callback to {callback_url}")
+                        
+                    if not XTTS.enable_cache_results:
+                        os.unlink(file_path)
+    except Exception as e:
+        logger.error(f"Error sending callback: {str(e)}")
+
 class OutputFolderRequest(BaseModel):
     output_folder: str
 
@@ -133,10 +158,12 @@ class TTSSettingsRequest(BaseModel):
     top_k: int
     enable_text_splitting: bool
 
+# Update the request model to include optional callback_url
 class SynthesisRequest(BaseModel):
     text: str
     speaker_wav: str 
     language: str
+    callback_url: AnyHttpUrl | None = None  # Optional callback URL
 
 class SynthesisFileRequest(BaseModel):
     text: str
@@ -258,7 +285,6 @@ async def tts_to_audio(request: SynthesisRequest, background_tasks: BackgroundTa
     if STREAM_MODE or STREAM_MODE_IMPROVE:
         try:
             global stream
-            # Validate language code against supported languages.
             if request.language.lower() not in supported_languages:
                 raise HTTPException(status_code=400,
                                     detail="Language code sent is either unsupported or misspelled.")
@@ -273,13 +299,15 @@ async def tts_to_audio(request: SynthesisRequest, background_tasks: BackgroundTa
             engine.set_voice(speaker_wav)
             engine.language = request.language.lower()
            
-            # Start streaming, works only on your local computer.
             stream.feed(request.text)
             play_stream(stream,language)
 
-            # It's a hack, just send 1 second of silence so that there is no sillyTavern error.
             this_dir = Path(__file__).parent.resolve()
             output = this_dir / "RealtimeTTS" / "silence.wav"
+
+            if request.callback_url:
+                background_tasks.add_task(send_callback, str(request.callback_url), str(output))
+                return {"message": "Audio generation started. Results will be sent to callback URL."}
 
             return FileResponse(
                 path=output,
@@ -293,40 +321,61 @@ async def tts_to_audio(request: SynthesisRequest, background_tasks: BackgroundTa
             if XTTS.model_source == "local":
                 logger.info(f"Processing TTS to audio with request: {request}")
 
-            # Validate language code against supported languages
             if request.language.lower() not in supported_languages:
                 raise HTTPException(status_code=400,
                                   detail="Language code sent is either unsupported or misspelled.")
 
-            # Generate unique output path
             output_file = f'{str(uuid4())}.wav'
 
-            # Submit to queue and wait for completion
-            result_path = await queue_manager.submit_request(
-                text=request.text,
-                speaker=request.speaker_wav,
-                language=request.language.lower(),
-                output_path=output_file
-            )
+            if request.callback_url:
+                # Create callback handler
+                callback_url = str(request.callback_url)
+                
+                def handle_completion(file_path: str):
+                    # Create task for async callback
+                    asyncio.create_task(send_callback(callback_url, file_path))
+                
+                # Submit with callback
+                await queue_manager.submit_request(
+                    text=request.text,
+                    speaker=request.speaker_wav,
+                    language=request.language.lower(),
+                    output_path=output_file,
+                    callback_fn=handle_completion
+                )
+                
+                return {"message": "Audio generation started. Results will be sent to callback URL."}
+            else:
+                # No callback - wait for result and return directly
+                result_path = await queue_manager.submit_request(
+                    text=request.text,
+                    speaker=request.speaker_wav,
+                    language=request.language.lower(),
+                    output_path=output_file
+                )
 
-            if not XTTS.enable_cache_results:
-                background_tasks.add_task(os.unlink, result_path)
+                if not XTTS.enable_cache_results:
+                    background_tasks.add_task(os.unlink, result_path)
 
-            return FileResponse(
-                path=result_path,
-                media_type='audio/wav',
-                filename="output.wav"
-            )
+                return FileResponse(
+                    path=result_path,
+                    media_type='audio/wav',
+                    filename="output.wav"
+                )
 
         except Exception as e:
             logger.error(e)
             raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# Add the queue status endpoint (optional but useful for monitoring)
 @app.get("/queue_status")
-def get_queue_status():
+async def get_queue_status():
     """Get current queue status"""
-    return queue_manager.get_queue_status()
+    try:
+        status = queue_manager.get_queue_status()
+        return status
+    except Exception as e:
+        logger.error(f"Error getting queue status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting queue status: {str(e)}")
 
 @app.post("/tts_to_file")
 async def tts_to_file(request: SynthesisFileRequest):

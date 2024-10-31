@@ -17,3 +17,4 @@ transformers==4.36.2
 uuid
 spacy==3.7.2
 sudachipy  # Added for ARM platform support
+aiohttp

@@ -1,5 +1,4 @@
 name: Docker Multi-arch Build
-
 on:
   workflow_dispatch:
 
@@ -8,30 +7,86 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
+      
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
-
+        
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-        
-      - name: Build for testing
+      
+      - name: Build and load amd64 for testing
+        uses: docker/build-push-action@v4
+        with:
+          context: ./
+          file: ./docker/Dockerfile.minimal
+          platforms: linux/amd64
+          load: true
+          tags: myapp:amd64
+      
+      - name: Build and load arm64 for testing
+        uses: docker/build-push-action@v4
+        with:
+          context: ./
+          file: ./docker/Dockerfile.minimal
+          platforms: linux/arm64
+          load: true
+          tags: myapp:arm64
+      
+      - name: Test amd64 container
+        run: |
+          # Start the container in the background
+          echo "Starting AMD64 container..."
+          docker run -d -p 8020:8020 --name test-amd64 myapp:amd64
+          
+          # Monitor logs during startup and model download
+          echo "Waiting for server to start and download model (this will take several minutes)..."
+          for i in {1..24}; do
+            echo "==== Log check $i (elapsed: $((i*5)) seconds) ===="
+            docker logs test-amd64 2>&1 | tail -n 20
+            sleep 5
+          done
+          
+          echo "Testing API endpoint..."
+          curl -v http://localhost:8020/get_models_list
+          
+          echo "Final container logs:"
+          docker logs test-amd64
+          
+          # Clean up
+          docker stop test-amd64
+      
+      - name: Test arm64 container
+        run: |
+          # Start the container in the background
+          echo "Starting ARM64 container..."
+          docker run -d -p 8021:8020 --platform linux/arm64 --name test-arm64 myapp:arm64
+          
+          # Monitor logs during startup and model download
+          echo "Waiting for server to start and download model (this will take several minutes)..."
+          for i in {1..24}; do
+            echo "==== Log check $i (elapsed: $((i*5)) seconds) ===="
+            docker logs test-arm64 2>&1 | tail -n 20
+            sleep 5
+          done
+          
+          echo "Testing API endpoint..."
+          curl -v http://localhost:8021/get_models_list
+          
+          echo "Final container logs:"
+          docker logs test-arm64
+          
+          # Clean up
+          docker stop test-arm64
+      
+      - name: Build final multi-arch images
         uses: docker/build-push-action@v4
         with:
           context: ./
           file: ./docker/Dockerfile.minimal
           platforms: linux/amd64,linux/arm64
-          outputs: type=image,name=myapp:latest,push=false
-          
-      - name: Test container
-        run: |
-          docker run --rm --platform linux/amd64 myapp:latest python -m xtts_api_server --version "v2.0.2"
-          docker run --rm --platform linux/arm64 myapp:latest python -m xtts_api_server --version "v2.0.2"
-
-      - name: Export images
-        run: |
-          docker save myapp:latest -o images.tar
-          
+          outputs: type=docker,dest=images.tar
+          tags: myapp:latest
+      
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:

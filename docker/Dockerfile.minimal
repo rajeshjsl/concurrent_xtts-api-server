@@ -44,6 +44,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OUTPUT_FOLDER="/app/xtts-server/output" \
     MODELS_FOLDER="/app/xtts-server/models" \
     MODEL_SOURCE="local" \
+    MODEL_VERSION="v2.0.2" \
     USE_CACHE="false"
 
 # Install runtime dependencies
@@ -85,6 +86,7 @@ exec python3 -m xtts_api_server \
     --output $OUTPUT_FOLDER \
     --model-folder $MODELS_FOLDER \
     --model-source $MODEL_SOURCE \
+    --version $MODEL_VERSION \
     --listen \
     $CACHE_ARG' > /app/start.sh && \
     chmod +x /app/start.sh

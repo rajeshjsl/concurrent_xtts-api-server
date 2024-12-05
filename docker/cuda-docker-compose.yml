@@ -22,12 +22,7 @@ services:
       resources:
         limits:
           cpus: '2'
-        reservations:
-          devices:
-            -
-              capabilities:
-                - gpu
-      
+    runtime: nvidia        
     restart: unless-stopped
 
 volumes:

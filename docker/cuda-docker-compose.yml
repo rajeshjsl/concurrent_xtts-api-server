@@ -16,6 +16,7 @@ services:
       - XTTS_URL=http://localhost:${CONTAINER_PORT:-8020}
       - MODEL_VERSION=${MODEL_VERSION:-v2.0.2}
       - DEVICE=cuda
+      - NVIDIA_VISIBLE_DEVICES=all
     ports:
       - "8020:8020"
     deploy:      

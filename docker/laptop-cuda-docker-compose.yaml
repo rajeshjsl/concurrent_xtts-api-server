@@ -1,0 +1,26 @@
+# if building via docker compose, for coolify, put base directory as /docker and docker compose location as /docker-compose.yml
+
+version: '3.9'
+services:
+  concurrentxttsapiserver:
+    image: rajeshjsl3/concurrentxttsapiserver:v2.0.2.4-cuda
+    env_file: .env   
+    volumes:
+      - xtts-server:/app/xtts-server
+    environment:
+      - XTTS_PORT=${CONTAINER_PORT:-8020}
+      - XTTS_HOST=0.0.0.0
+      - XTTS_URL=http://localhost:${CONTAINER_PORT:-8020}
+      - MODEL_VERSION=${MODEL_VERSION:-v2.0.2}
+      - DEVICE=cuda
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:      
+      resources:
+        limits:
+          cpus: '2'
+    runtime: nvidia        
+    restart: unless-stopped
+
+volumes:
+  xtts-server:
+    name: xtts-server
